@@ -1,18 +1,34 @@
 #include "PPMReader.h"
 
 // RC receiver channel
-#define RC_RX 0
+#define RC_RX_PIN 2
+#define RC_CH_IDX_DIR 3
+#define RC_CH_IDX_VRA 4
+#define RC_CH_IDX_VRB 5
 
 // Pins associated to each motor signal
 #define DRV_PWM 5
-#define DIR_L_PWM 9
-#define DIR_R_PWM 10
+#define DIR_L_PWM 10
+#define DIR_R_PWM 9
 #define LED_PWM 11
 #define DIR_SEN A0
 
-const float moteur_av_gain_pid[3] = {0.05f, 0.01f, 0.0f};
+#define DIR_CMD_CEN 1500
+#define DIR_CMD_LEFT 1000
+#define DIR_CMD_RIGHT 2000
+#define DIR_SEN_CEN 550
+#define DIR_SEN_LEFT 750
+#define DIR_SEN_RIGHT 350
+ 
+#define DEBUG_RC_CH 0
+#define DEBUG 1
 
-PPMReader ppmReader(2, 0, false);
+float dir_gain_pid[3] = {0.005f, 0.0f, 0.0f};
+long integrale = 0;
+long erreur_prec = 0;
+int commande_prec = 0;
+          
+PPMReader ppmReader(RC_RX_PIN, 0, false);
 
 // Controle de la direction et de la propulsion
 int pid(long &integrale,
@@ -47,21 +63,70 @@ void loop()
   // Reading the direction potentiometer value
   long dir_sen_val = analogRead(DIR_SEN);
   
-  Serial.print("Direction sensor value: ");
-  Serial.print(dir_sen_val);
-  Serial.println(".");
-
-
   uint8_t ch_num = 0;
   int ppm_ch[8];
   while(ppmReader.get(ch_num) != 0){  
-    // Print out the servo values
-    Serial.print(ppmReader.get(ch_num));
-    Serial.print("  ");
+    if(DEBUG_RC_CH) {
+      // Print out the servo values
+      Serial.print(ppmReader.get(ch_num));
+      Serial.print("  ");      
+    }
     ppm_ch[ch_num] = ppmReader.get(ch_num);
     ch_num++;
   }
-  Serial.println("");
+  if(DEBUG_RC_CH) {
+    Serial.println("");
+  }
+
+  long gain_i32;
+  gain_i32 = map(ppm_ch[RC_CH_IDX_VRA], 1000, 2000, 0, 1000);  
+  dir_gain_pid[0] = (float)gain_i32 * 0.005;
+  gain_i32 = map(ppm_ch[RC_CH_IDX_VRB], 1000, 2000, 0, 1000);  
+  dir_gain_pid[2] = (float)gain_i32 * 0.001;
+
+  if(DEBUG) {
+    Serial.print("Gains: ");
+    Serial.print(dir_gain_pid[0], 4);
+    Serial.print(" ");
+    Serial.print(dir_gain_pid[2], 5);
+    Serial.println(".");
+  }
+
+  // Set direction PWM 
+  // Centre RC command value around 0
+  long setpoint = map(ppm_ch[RC_CH_IDX_DIR], DIR_CMD_LEFT, DIR_CMD_RIGHT,
+                                             DIR_SEN_LEFT, DIR_SEN_RIGHT);
+  int dir_cmd = pid(integrale,
+                    erreur_prec,
+                    commande_prec,
+                    setpoint, 
+                    dir_sen_val,
+                    -255, 
+                    255, 
+                    dir_gain_pid);
+        
+  byte dir_l_pwm = constrain(map(dir_cmd, 0, 255, 0, 255), 0, 255);
+  byte dir_r_pwm = constrain(map(dir_cmd, -255, 0, 255, 0), 0, 255);
+
+  // Print out the pwm output values
+  if(DEBUG) {
+    Serial.print(integrale);
+    Serial.print("  ");
+    Serial.print(erreur_prec);
+    Serial.print("  ");
+    Serial.print(setpoint);
+    Serial.print("  ");
+    Serial.print(dir_cmd);
+    Serial.print("  ");
+    Serial.print(dir_l_pwm);
+    Serial.print("  ");
+    Serial.print(dir_r_pwm);
+    Serial.print("  ");
+    Serial.println("");
+  }
+
+  analogWrite(DIR_L_PWM, dir_l_pwm);
+  analogWrite(DIR_R_PWM, dir_r_pwm);
 
   /* Set motor PWM 
   byte dir_l, dir_r, drv, led;
@@ -75,6 +140,8 @@ void loop()
   analogWrite(ML_REV, lr);
   analogWrite(MR_FWD, rf);
   analogWrite(MR_REV, rr);*/
+
+  delay(50);
 }
 
 
@@ -110,6 +177,11 @@ int pid(long &integrale,
   if(erreur * commande_non_saturee <= 0 || 
      !saturation) {
     integrale += erreur;      
+  }
+  // Check sign of integral term; if error and integral are 
+  // not on the same side then reset the integral
+  if(erreur * integrale < 0) {
+    integrale = 0;
   }
   
   // Mise a jour de l'erreur        

@@ -23,7 +23,7 @@
 #define DEBUG_RC_CH 0
 #define DEBUG 1
 
-float dir_gain_pid[3] = {0.005f, 0.0f, 0.0f};
+float dir_gain_pid[3] = {0.0f, 0.0f, 0.0f};
 long integrale = 0;
 long erreur_prec = 0;
 int commande_prec = 0;
@@ -88,7 +88,7 @@ void loop()
     Serial.print("Gains: ");
     Serial.print(dir_gain_pid[0], 4);
     Serial.print(" ");
-    Serial.print(dir_gain_pid[2], 5);
+    Serial.print(dir_gain_pid[1], 5);
     Serial.println(".");
   }
 
@@ -157,8 +157,8 @@ int pid(long &integrale,
   long erreur = commande_desiree - lecture;
   
   float commande_pid = gain_pid[0] * (float)erreur + 
-                       gain_pid[1] * (float)(erreur - erreur_prec) + 
-                       gain_pid[2] * (float)integrale;
+                       gain_pid[1] * (float)integrale + 
+                       gain_pid[2] * (float)(erreur - erreur_prec);
     
   int commande_actuelle;
   int commande_non_saturee = static_cast<int>(commande_pid);
@@ -177,11 +177,6 @@ int pid(long &integrale,
   if(erreur * commande_non_saturee <= 0 || 
      !saturation) {
     integrale += erreur;      
-  }
-  // Check sign of integral term; if error and integral are 
-  // not on the same side then reset the integral
-  if(erreur * integrale < 0) {
-    integrale = 0;
   }
   
   // Mise a jour de l'erreur        
